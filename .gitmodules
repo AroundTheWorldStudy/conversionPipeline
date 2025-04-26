@@ -1,0 +1,3 @@
+[submodule "Wav2Lip2"]
+	path = Wav2Lip2
+	url = https://github.com/Rudrabha/Wav2Lip
