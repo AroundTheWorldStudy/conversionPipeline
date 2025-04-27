@@ -229,7 +229,7 @@ def createSyncedVideo(audio_url: str, video_url: str, outputDir: str):
 def writeAttributesInLanguages(title: str, bucket_name: str, audioFileURI: str, theLanguage=None):
     fetchFromGoogleCloudStorage(bucket_name, audioFileURI)
 
-    file = geminiClient.files.upload(file=audioFileURI)
+    # file = geminiClient.files.upload(file=audioFileURI)
 
     geminiClient = genai.Client(api_key=googleAPIKey)
 
@@ -262,7 +262,7 @@ def writeAttributesInLanguages(title: str, bucket_name: str, audioFileURI: str, 
         """
         response = geminiClient.models.generate_content(
             model="gemini-2.5-pro-preview-03-25",
-            contents=[file, prompt]
+            contents=prompt
         )
         
         this_list.append(response.text)
@@ -283,7 +283,7 @@ def writeAttributesInLanguages(title: str, bucket_name: str, audioFileURI: str, 
         """
         response = geminiClient.models.generate_content(
             model="gemini-2.5-pro-preview-03-25",
-            contents=[file, prompt]
+            contents=prompt
         )
         
         this_list.append(response.text)
@@ -319,43 +319,42 @@ def writeAttributesInLanguages(title: str, bucket_name: str, audioFileURI: str, 
 @main.route('/build_audio_files', methods=['POST'])
 def buildAudioFilesLanguage():
     audioFileUri = request.json.get('audioFileUri')
-    language = request.json.get('language')
     id = request.json.get('id')
     googleAPIKey = request.json.get('googleAPIKey')
     cloudStorageBucketURI = request.json.get('cloudStorageBucketURI')
     title = request.json.get('title')
 
-    fetchFromGoogleCloudStorage(cloudStorageBucketURI, audioFileUri)
-    getFlacFromMp4(audioFileUri)
-    oldAudioFileUri = audioFileUri
-    audioFileUri = audioFileUri.replace(".mp4", ".flac")
-    uploadToGoogleCloudStorage(cloudStorageBucketURI, audioFileUri, f"{id}/{id}.flac")
-    trancscribedAudioFile = transcribeAudioFile(f"gs://{cloudStorageBucketURI}/{id}/{id}.flac", googleAPIKey)
-    audioProfile = getCurrentAudioProfile(audioFileUri, googleAPIKey)
-    targetLanguage = languages[language]
-    print(f"Language: {language}. Language code: {targetLanguage}")
-    translatedText = translateTextToOtherLanguage(trancscribedAudioFile, targetLanguage, googleAPIKey)
-    outputMetadata = textToSpeechSelectLanguage(translatedText.text, audioFileUri, targetLanguage, id, audioProfile.text, googleAPIKey)
-    video = uploadToGoogleCloudStorage(cloudStorageBucketURI, oldAudioFileUri, f"{id}/{id}.mp4")
-  
-    sound = pydub.AudioSegment.from_mp3(outputMetadata['outpath'])
-    newOutputMetda = outputMetadata['outpath'].replace(".mp3", ".wav")
-    sound.export(newOutputMetda, format="wav")
-    audio = uploadToGoogleCloudStorage(cloudStorageBucketURI, newOutputMetda)
+    for language, targetLanguage in languages.items():
+        fetchFromGoogleCloudStorage(cloudStorageBucketURI, audioFileUri)
+        getFlacFromMp4(audioFileUri)
+        oldAudioFileUri = audioFileUri
+        audioFileUri = audioFileUri.replace(".mp4", ".flac")
+        uploadToGoogleCloudStorage(cloudStorageBucketURI, audioFileUri, f"{id}/{id}.flac")
+        trancscribedAudioFile = transcribeAudioFile(f"gs://{cloudStorageBucketURI}/{id}/{id}.flac", googleAPIKey)
+        audioProfile = getCurrentAudioProfile(audioFileUri, googleAPIKey)
+        print(f"Language: {language}. Language code: {targetLanguage}")
+        translatedText = translateTextToOtherLanguage(trancscribedAudioFile, targetLanguage, googleAPIKey)
+        outputMetadata = textToSpeechSelectLanguage(translatedText.text, audioFileUri, targetLanguage, id, audioProfile.text, googleAPIKey)
+        video = uploadToGoogleCloudStorage(cloudStorageBucketURI, oldAudioFileUri, f"{id}/{id}.mp4")
+    
+        sound = pydub.AudioSegment.from_mp3(outputMetadata['outpath'])
+        newOutputMetda = outputMetadata['outpath'].replace(".mp3", ".wav")
+        sound.export(newOutputMetda, format="wav")
+        audio = uploadToGoogleCloudStorage(cloudStorageBucketURI, newOutputMetda)
 
-    createSyncedVideo(audio, video, f"{targetLanguage}_output.mp4")
+        createSyncedVideo(audio, video, f"{targetLanguage}_output.mp4")
 
-    uploadToGoogleCloudStorage(cloudStorageBucketURI, f"{targetLanguage}_output.mp4", f"{id}/{targetLanguage}_output.mp4")
+        uploadToGoogleCloudStorage(cloudStorageBucketURI, f"{targetLanguage}_output.mp4", f"{id}/{targetLanguage}_output.mp4")
 
-    # Generate metadata and upload it
-    metadata = writeAttributesInLanguages(title, cloudStorageBucketURI, audioFileUri, id, language)
-    metadata_file_path = f"{id}/metadata.json"
-    with open(metadata_file_path, "w") as metadata_file:
-        json.dump(metadata, metadata_file)
-    uploadToGoogleCloudStorage(cloudStorageBucketURI, metadata_file_path, metadata_file_path)
+        # Generate metadata and upload it
+        metadata = writeAttributesInLanguages(title, cloudStorageBucketURI, audioFileUri, id, language)
+        metadata_file_path = f"{id}/metadata.json"
+        with open(metadata_file_path, "w") as metadata_file:
+            json.dump(metadata, metadata_file)
+        uploadToGoogleCloudStorage(cloudStorageBucketURI, metadata_file_path, metadata_file_path)
 
-    if not audioFileUri or not language or not id or not googleAPIKey:
-        return jsonify({"error": "Missing required parameters"}), 400
+        if not audioFileUri or not id or not googleAPIKey:
+            return jsonify({"error": "Missing required parameters"}), 400
 
 def aggregateDefinitionToBuildAudiofiles(audioFileUri: str,  bucketName: str, googleAPIKey: str) -> None:
     id = get_next_id(bucketName)
