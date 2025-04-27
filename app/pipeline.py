@@ -34,7 +34,13 @@ def _split_text_to_chunks(text: str, max_chars: int = 4500) -> list[str]:
     return chunks
 
 @main.route('/fetch_audio', methods=['POST'])
-def fetchFromGoogleCloudStorage(bucketName: str, id: str) -> None:
+def fetchFromGoogleCloudStorage(bucketName: str | None = None, id: str | None = None):
+    if bucketName is None:
+        data = request.get_json()
+        if not data or 'bucketName' not in data or 'id' not in data:
+            return jsonify({"error": "Missing bucketName or id"})
+        bucketName = data['bucketName']
+        id = data['id']
     print(f"Fetching file from Google Cloud Storage: {bucketName}/{id}")
     storageClient  = storage.Client()
     bucket = storageClient.bucket(bucketName)
@@ -42,9 +48,17 @@ def fetchFromGoogleCloudStorage(bucketName: str, id: str) -> None:
     if not os.path.exists(id):
         os.makedirs(os.path.dirname(id), exist_ok=True)
     blob.download_to_filename(id)
+    return jsonify({"message": f"File {id} fetched successfully from bucket {bucketName}"})
 
 @main.route('/upload_audio', methods=['POST'])
-def uploadToGoogleCloudStorage(bucketName: str, fileName: str, targetFileUri: str | None = None) -> None:
+def uploadToGoogleCloudStorage(bucketName: str | None = None, fileName: str | None = None, targetFileUri: str | None = None):
+    if bucketName is None:
+        data = request.get_json()
+        if not data or 'bucketName' not in data or 'fileName' not in data:
+            return jsonify({"error": "Missing bucketName or fileName"})
+        bucketName = data['bucketName']
+        fileName = data['fileName']
+        targetFileUri = data['targetFileUri'] if 'targetFileUri' in data else None
     print(f"Uploading file to Google Cloud Storage: {bucketName}/{fileName}")
     if targetFileUri is None:
         targetFileUri = fileName
@@ -52,6 +66,7 @@ def uploadToGoogleCloudStorage(bucketName: str, fileName: str, targetFileUri: st
     bucket = storageClient.bucket(bucketName)
     blob = bucket.blob(targetFileUri)
     blob.upload_from_filename(fileName)
+    return jsonify({"message": f"File {fileName} successfully uploaded to bucket {bucketName}"})
 
 def getFlacFromMp4(audioFileUri: str) -> None:
     clip = moviepy.VideoFileClip(audioFileUri)
@@ -59,19 +74,26 @@ def getFlacFromMp4(audioFileUri: str) -> None:
     clip.audio.write_audiofile(newAudioFileUri, codec="flac", ffmpeg_params=["-sample_fmt", "s16", "-ac", "1"])
 
 @main.route('/get_audio_profile', methods=['GET'])
-def getCurrentAudioProfile(audioFileUri: str, googleAPIKey: str) -> str: 
+def getCurrentAudioProfile(audioFileUri: str | None = None, googleAPIKey: str | None = None):
+    if audioFileUri is None:
+        data = request.get_json()
+        if not data or 'audioFileUri' not in data or 'googleAPIKey' not in data:
+            return jsonify({"error": "Missing audioFileUri or googleAPIKey"})
+        audioFileUri = data['audioFileUri']
+        googleAPIKey = data['googleAPIKey']
     print(f"Getting current audio profile for: {audioFileUri}")
     geminiClient = genai.Client(api_key=googleAPIKey)
     file = geminiClient.files.upload(file=audioFileUri)
-    respone = geminiClient.models.generate_content(
+    response = geminiClient.models.generate_content(
         model="gemini-2.5-flash-preview-04-17",
         contents=[file,"\n\n Which chipr voice option best fits the audio file? [Aoede, Puck, Charon, Kore, Fenrir, Leda, Orus, Zephyr]. Only output the name of the voice option (Only the key from the list)."]
     )
-    print(f"Response: {respone.text}")
-    return respone
+    print(f"Response: {response.text}")
+    return jsonify({"response": response.text})
 
-@main.route('/transcribe_audio', methods=['GET'])
+
 def transcribeAudioFile(gcs_uri: str, googleAPIKey: str) -> speech.RecognizeResponse:
+
     print(f"Transcribing audio file: {gcs_uri}")
     googleSpeachClient = speech.SpeechClient()
     audio = speech.RecognitionAudio(uri=gcs_uri)
