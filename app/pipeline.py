@@ -3,7 +3,7 @@ from google.cloud import storage, speech, texttospeech
 from google.api_core.client_options import ClientOptions
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
-import re, os, io, pydub, moviepy, time, requests
+import re, os, io, pydub, moviepy, time, requests, json
 from flask import Blueprint, request, jsonify
 
 main = Blueprint('main', __name__)
@@ -226,6 +226,96 @@ def createSyncedVideo(audio_url: str, video_url: str, outputDir: str):
     except:
         print("Video not generated properly")
 
+def writeAttributesInLanguages(title: str, bucket_name: str, audioFileURI: str, theLanguage=None):
+    fetchFromGoogleCloudStorage(bucket_name, audioFileURI)
+
+    file = geminiClient.files.upload(file=audioFileURI)
+
+    geminiClient = genai.Client(api_key=googleAPIKey)
+
+    title_description_category = {}
+
+    # dummy variable to make the code work
+    all_languages_and_english = languages.copy()
+    all_languages_and_english["English"] = "en-US"
+
+
+    for language in all_languages_and_english.keys():
+        title_description_category[language] = []
+
+    
+    def get_attributes_list(language):
+        this_list = []
+
+        prompt = f"""You are a professional translation engine.
+            When I give you:
+            - Source: a title of a youtube video in English.
+            - Target: Title of the video in {language}.
+
+            Your output must be **only** the translated text in the target language—no notes, no metadata.
+
+            Requirements:
+            1. Make the title **engaging** and **catchy**
+
+            Here is the text to translate: 
+            {title}
+        """
+        response = geminiClient.models.generate_content(
+            model="gemini-2.5-pro-preview-03-25",
+            contents=[file, prompt]
+        )
+        
+        this_list.append(response.text)
+
+        prompt = f"""You are a professional translation engine.
+            When I give you:
+            - Source: a title of a youtube video in English.
+            - Target: Description of the video in {language}.
+
+            Your output must be **only** the translated text in the target language—no notes, no metadata.
+
+            Requirements:
+            1. Make the description **engaging** and **catchy**
+            2. Make it roughly two sentences long
+
+            Here is the text to translate: 
+            {title}
+        """
+        response = geminiClient.models.generate_content(
+            model="gemini-2.5-pro-preview-03-25",
+            contents=[file, prompt]
+        )
+        
+        this_list.append(response.text)
+
+
+        prompt = f"""You are a professional translation engine.
+            When I give you:
+            - Source: a title of a youtube video in English.
+            - Target: Subject of this video either: Computer Science, Math, Chemistry, Biology.
+
+            Your output must be **only** the translated text in the target language—no notes, no metadata. Also, must be one of the above subjects
+
+            Here is the text to translate: 
+            {title}
+        """
+        response = geminiClient.models.generate_content(
+            model="gemini-2.5-pro-preview-03-25",
+            contents=[file, prompt]
+        )
+        
+        this_list.append(response.text)
+
+        return this_list
+
+
+    if theLanguage is not None:
+        return get_attributes_list(theLanguage)
+
+    for language in all_languages_and_english.keys():
+        title_description_category[language] = get_attributes_list(language)
+    return title_description_category
+
 @main.route('/build_audio_files', methods=['POST'])
 def buildAudioFilesLanguage():
     audioFileUri = request.json.get('audioFileUri')
@@ -233,6 +323,7 @@ def buildAudioFilesLanguage():
     id = request.json.get('id')
     googleAPIKey = request.json.get('googleAPIKey')
     cloudStorageBucketURI = request.json.get('cloudStorageBucketURI')
+    title = request.json.get('title')
 
     fetchFromGoogleCloudStorage(cloudStorageBucketURI, audioFileUri)
     getFlacFromMp4(audioFileUri)
@@ -255,6 +346,13 @@ def buildAudioFilesLanguage():
     createSyncedVideo(audio, video, f"{targetLanguage}_output.mp4")
 
     uploadToGoogleCloudStorage(cloudStorageBucketURI, f"{targetLanguage}_output.mp4", f"{id}/{targetLanguage}_output.mp4")
+
+    # Generate metadata and upload it
+    metadata = writeAttributesInLanguages(title, cloudStorageBucketURI, audioFileUri, id, language)
+    metadata_file_path = f"{id}/metadata.json"
+    with open(metadata_file_path, "w") as metadata_file:
+        json.dump(metadata, metadata_file)
+    uploadToGoogleCloudStorage(cloudStorageBucketURI, metadata_file_path, metadata_file_path)
 
     if not audioFileUri or not language or not id or not googleAPIKey:
         return jsonify({"error": "Missing required parameters"}), 400
