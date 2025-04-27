@@ -2,7 +2,6 @@
 from google import genai
 from google.cloud import storage, speech, texttospeech
 from google.api_core.client_options import ClientOptions
-import google.auth
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 import re, os, io, pydub, moviepy
@@ -63,6 +62,7 @@ def transcribeAudioFile(gcs_uri: str, googleAPIKey: str) -> speech.RecognizeResp
     audio = speech.RecognitionAudio(uri=gcs_uri)
     config = speech.RecognitionConfig(
         encoding=speech.RecognitionConfig.AudioEncoding.FLAC,
+        model="latest_long",
         language_code="en-US",
         enable_automatic_punctuation=True,
         enable_separate_recognition_per_channel=False,
@@ -70,6 +70,8 @@ def transcribeAudioFile(gcs_uri: str, googleAPIKey: str) -> speech.RecognizeResp
 
     operation = googleSpeachClient.long_running_recognize(config=config, audio=audio)
     response = operation.result(timeout=3600)  # wait up to an hour
+
+    print(response.results)
 
     # 3) stitch every chunk together
     transcripts = [r.alternatives[0].transcript for r in response.results]
@@ -85,9 +87,11 @@ def translateTextToOtherLanguage(textToTranslate: str, targetLanguage: str, goog
         Your output must be **only** the translated text in the target language—no notes, no metadata.
 
         **Strict requirements:**
-        2. **Duration match**: If needed, restructure sentences or pick synonyms so that the spoken duration stays within ±5% of the original.  
+        2. **Duration match**: If needed, restructure sentences or pick synonyms so that **the spoken duration stays within 1% of the original.** 
         3. **Meaning preserved**: No additions or omissions—convey the exact same message.
         4. **Frequent period** use smaller sentences to allow for the translated text to be translated to speech.
+        5. **No extra text**: No explanations, no metadata, just the translated text. 
+        6. **Analyze speach for the language**: Contain the spoken time of ouput {targetLanguage} in close duration to the original text. Analyze the cadence of speach and the pauses in the original text to match the cadence of the translated text.
 
         Here is the text to translates: 
         {textToTranslate}
@@ -112,18 +116,14 @@ def textToSpeechSelectLanguage(textInput: str, audioFileUri: str, targetLanguage
     final_audio = pydub.AudioSegment.empty()
     for chunk in chunks:
         synthesis_input = texttospeech.SynthesisInput(text=chunk)
-        resp = client.synthesize_speech(
+        resp = textToSpeechClient.synthesize_speech(
             input=synthesis_input,
             voice=voice,
-            audio_config=audio_cfg
+            audio_config=audio_config
         )
         segment = pydub.AudioSegment.from_file(io.BytesIO(resp.audio_content), format="mp3")
         final_audio += segment
-    response = textToSpeechClient.synthesize_speech(
-        input=formatedText,
-        voice=voice,
-        audio_config=audio_config,
-    )
+
     orig_duration = FLAC(audioFileUri).info.length
     print(orig_duration)
     resp_duration = len(final_audio) / 1000.0
@@ -140,7 +140,7 @@ def textToSpeechSelectLanguage(textInput: str, audioFileUri: str, targetLanguage
     outdir  = os.path.dirname(outpath)
     os.makedirs(outdir, exist_ok=True)
     sped_up.export(outpath, format="mp3")
-    return {"response" : response, "outpath" : outpath}
+    return {"response" : final_audio, "outpath" : outpath}
 
 
 def aggregateDefinitionToBuildAudiofiles(audioFileUri: str,  bucketName: str, id: str, googleAPIKey: str) -> None:
@@ -158,4 +158,4 @@ def aggregateDefinitionToBuildAudiofiles(audioFileUri: str,  bucketName: str, id
         uploadToGoogleCloudStorage(bucketName, f"{outputMetadata["outpath"]}")
 
 if __name__ == "__main__":
-    aggregateDefinitionToBuildAudiofiles("media/english_video.mp4", cloudStorageBucketURI, "1", googleAPIKey)
+    aggregateDefinitionToBuildAudiofiles("way_cut_english_video.mp4", cloudStorageBucketURI, "1", googleAPIKey)

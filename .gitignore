@@ -7,7 +7,7 @@ __pycache__/
 *.so
 
 # Distribution / packaging
-media
+*media
 *.mp3
 *.mp4
 *.flac
