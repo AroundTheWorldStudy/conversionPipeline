@@ -1,9 +1,17 @@
+from google import genai
 from google.cloud import speech
-import grpc
-import io
-# from google.cloud import texttospeech
 
-# from google.cloud import speech
+def get_correct_voice_option(audio_file: str) -> str: 
+    client = genai.Client(api_key="AIzaSyCt9EYZ-gEpDVC_RmRU1kUAPiOdKqMcBqA")
+
+    file = client.files.upload(file=audio_file)
+
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[file,"\n\n Which chipr voice option best fits the audio file mainly consider gender? [Aoede : Female, Puck : Male, Charon : Male, Kore :  Female, Fenrir : Male, Leda : Female, Orus : Male, Zephyr : Female]. Only output the word of the voice option."]
+    )
+
+    return response
 
 
 def transcribe_file_with_auto_punctuation(audio_file: str) -> speech.RecognizeResponse:
@@ -35,8 +43,3 @@ def transcribe_file_with_auto_punctuation(audio_file: str) -> speech.RecognizeRe
         total_results.append(result.alternatives[0].transcript)
 
     return ''.join(total_results)
-
-
-print(transcribe_file_with_auto_punctuation('media/way_cut_english_video.mp3'))
-
-

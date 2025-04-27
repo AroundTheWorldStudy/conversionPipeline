@@ -6,3 +6,6 @@ torch
 torchvision
 tqdm
 numba
+google-cloud-speech
+google-cloud-storage
+google-genai==1.12.1
