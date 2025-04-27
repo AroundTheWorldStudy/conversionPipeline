@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # copy app code
-COPY app.py .
+COPY run.py .
 
 # tell Flask where the app is
 ENV FLASK_APP=app.py
