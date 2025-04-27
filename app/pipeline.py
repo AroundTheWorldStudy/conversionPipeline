@@ -109,7 +109,7 @@ def translateTextToOtherLanguage(textToTranslate: str, targetLanguage: str, goog
     )
     return response
 
-def textToSpeechSelectLanguage(textInput: str, audioFileUri: str, id: str, audioProfile: str, googleAPIKey: str) -> None:
+def textToSpeechSelectLanguage(textInput: str, title:str, audioFileUri: str, id: str, audioProfile: str, googleAPIKey: str) -> None:
     for targetLanguage in languages.values():
         textToSpeechClient = texttospeech.TextToSpeechClient(client_options=ClientOptions(api_key=googleAPIKey))
         audio_config = texttospeech.AudioConfig(
@@ -272,5 +272,5 @@ def aggregateDefinitionToBuildAudiofiles(audioFileUri: str,  bucketName: str, go
         print(f"Language: {language}. Language code: {targetLanguage}")
         translatedText = translateTextToOtherLanguage(transcribedAudioFile, language, googleAPIKey)
         outputMetadata = textToSpeechSelectLanguage(translatedText.text, audioFileUri, targetLanguage, id, audioProfile.text, googleAPIKey)
-        uploadToGoogleCloudStorage(bucketName, f"{outputMetadata["outpath"]}")
+        uploadToGoogleCloudStorage(bucketName, outputMetadata["outpath"])
         createSyncedVideo(outputMetadata['outpath'], audioFileUri)
