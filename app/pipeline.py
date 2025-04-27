@@ -5,9 +5,20 @@ from google.api_core.client_options import ClientOptions
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 import re, os, io, pydub, moviepy
+from flask import Blueprint, request, jsonify
 
+main = Blueprint('main', __name__)
 googleAPIKey = os.getenv("GOOGLE_API_KEY")
 cloudStorageBucketURI = os.getenv("CLOUD_STORAGE_BUCKET_URI")
+languages = {"Espanol": "es-US", "Francais": "fr-FR", "Deutsch": "nl-NL", "Portugues": "pt-BR", "Chinese": "cmn-CN", "Hindi": "hi-IN", "Arabic": "ar-XA"}
+
+@main.route('/')
+def home():
+    return "Hello, World!"
+
+@main.route('/about')
+def about():
+    return "This is the about page."
 
 def _split_text_to_chunks(text: str, max_chars: int = 4500) -> list[str]:
     parts = re.split(r'([\.!\?]\s)', text)
@@ -22,6 +33,7 @@ def _split_text_to_chunks(text: str, max_chars: int = 4500) -> list[str]:
         chunks.append(buf)
     return chunks
 
+@main.route('/fetch_audio', methods=['POST'])
 def fetchFromGoogleCloudStorage(bucketName: str, id: str) -> None:
     print(f"Fetching file from Google Cloud Storage: {bucketName}/{id}")
     storageClient  = storage.Client()
@@ -31,6 +43,7 @@ def fetchFromGoogleCloudStorage(bucketName: str, id: str) -> None:
         os.makedirs(os.path.dirname(id), exist_ok=True)
     blob.download_to_filename(id)
 
+@main.route('/upload_audio', methods=['POST'])
 def uploadToGoogleCloudStorage(bucketName: str, fileName: str, targetFileUri: str | None = None) -> None:
     print(f"Uploading file to Google Cloud Storage: {bucketName}/{fileName}")
     if targetFileUri is None:
@@ -44,7 +57,8 @@ def getFlacFromMp4(audioFileUri: str) -> None:
     clip = moviepy.VideoFileClip(audioFileUri)
     newAudioFileUri = audioFileUri.replace(".mp4", ".flac")
     clip.audio.write_audiofile(newAudioFileUri, codec="flac", ffmpeg_params=["-sample_fmt", "s16", "-ac", "1"])
-    
+
+@main.route('/get_audio_profile', methods=['GET'])
 def getCurrentAudioProfile(audioFileUri: str, googleAPIKey: str) -> str: 
     print(f"Getting current audio profile for: {audioFileUri}")
     geminiClient = genai.Client(api_key=googleAPIKey)
@@ -56,6 +70,7 @@ def getCurrentAudioProfile(audioFileUri: str, googleAPIKey: str) -> str:
     print(f"Response: {respone.text}")
     return respone
 
+@main.route('/transcribe_audio', methods=['GET'])
 def transcribeAudioFile(gcs_uri: str, googleAPIKey: str) -> speech.RecognizeResponse:
     print(f"Transcribing audio file: {gcs_uri}")
     googleSpeachClient = speech.SpeechClient()
@@ -77,6 +92,7 @@ def transcribeAudioFile(gcs_uri: str, googleAPIKey: str) -> speech.RecognizeResp
     transcripts = [r.alternatives[0].transcript for r in response.results]
     return " ".join(transcripts).strip()
 
+@main.route('/translate_text', methods=['POST'])
 def translateTextToOtherLanguage(textToTranslate: str, targetLanguage: str, googleAPIKey: str) -> str:
     geminiClient = genai.Client(api_key=googleAPIKey)
     prompt = f"""You are a professional translation engine.
@@ -103,6 +119,7 @@ def translateTextToOtherLanguage(textToTranslate: str, targetLanguage: str, goog
     )
     return response
 
+@main.route('text_to_speech', methods=['POST'])
 def textToSpeechSelectLanguage(textInput: str, audioFileUri: str, targetLanguage: str, id: str, audioProfile: str, googleAPIKey: str) -> None:
     textToSpeechClient = texttospeech.TextToSpeechClient(client_options=ClientOptions(api_key=googleAPIKey))
     audio_config = texttospeech.AudioConfig(
@@ -141,6 +158,22 @@ def textToSpeechSelectLanguage(textInput: str, audioFileUri: str, targetLanguage
     os.makedirs(outdir, exist_ok=True)
     sped_up.export(outpath, format="mp3")
     return {"response" : final_audio, "outpath" : outpath}
+
+@main.route('/build_audio_files', methods=['POST'])
+def buildAudioFilesLanguage(audioFileUri: str, language: str, id: str, googleAPIKey: str) -> None:
+    fetchFromGoogleCloudStorage(cloudStorageBucketURI, audioFileUri)
+    getFlacFromMp4(audioFileUri)
+    audioFileUri = audioFileUri.replace(".mp4", ".flac")
+    uploadToGoogleCloudStorage(cloudStorageBucketURI, audioFileUri, f"{id}/{id}.flac")
+    trancscribedAudioFile = transcribeAudioFile(f"gs://{cloudStorageBucketURI}/{id}/{id}.flac", googleAPIKey)
+    audioProfile = getCurrentAudioProfile(audioFileUri, googleAPIKey)
+    targetLanguage = languages[language]
+    print(f"Language: {language}. Language code: {targetLanguage}")
+    translatedText = translateTextToOtherLanguage(trancscribedAudioFile, targetLanguage, googleAPIKey)
+    outputMetadata = textToSpeechSelectLanguage(translatedText.text, audioFileUri, targetLanguage, id, audioProfile.text, googleAPIKey)
+    uploadToGoogleCloudStorage(cloudStorageBucketURI, f"{outputMetadata['outpath']}")
+
+
 
 
 def aggregateDefinitionToBuildAudiofiles(audioFileUri: str,  bucketName: str, id: str, googleAPIKey: str) -> None:

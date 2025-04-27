@@ -1,2 +1,3 @@
 # Conversion Pipeline
-- pipeline.py defines the varius steps and enpoints in data transformation 
+
+This repo handles the backend logic for translation from English to another language. Through speech to text, translation, and text to speech, it translates and makes the audio
